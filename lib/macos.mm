@@ -23,7 +23,7 @@ Napi::Boolean requestAccessibility(const Napi::CallbackInfo &info) {
 }
 
 NSDictionary* getWindowInfo(int handle) {
-  CGWindowListOption listOptions = kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements;
+  CGWindowListOption listOptions = kCGWindowListExcludeDesktopElements; // kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements;
   CFArrayRef windowList = CGWindowListCopyWindowInfo(listOptions, kCGNullWindowID);
 
   for (NSDictionary *info in (NSArray *)windowList) {
@@ -33,6 +33,7 @@ NSDictionary* getWindowInfo(int handle) {
         // Retain property list so it doesn't get release w. windowList
         CFRetain((CFPropertyListRef)info);
         CFRelease(windowList);
+        // NSLog(@"Dictionary: %@", [info description]);
         return info;
     }
   }
@@ -105,19 +106,30 @@ AXUIElementRef getAXWindowById(int handle) {
 Napi::Array getWindows(const Napi::CallbackInfo &info) {
   Napi::Env env{info.Env()};
 
-  CGWindowListOption listOptions = kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements;
+  CGWindowListOption listOptions = kCGWindowListExcludeDesktopElements; // kCGWindowListOptionAll; // kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements;
   CFArrayRef windowList = CGWindowListCopyWindowInfo(listOptions, kCGNullWindowID);
+  // NSLog(@"%@", windowList);
 
   std::vector<Napi::Number> vec;
 
   for (NSDictionary *info in (NSArray *)windowList) {
     NSNumber *ownerPid = info[(id)kCGWindowOwnerPID];
     NSNumber *windowNumber = info[(id)kCGWindowNumber];
+    NSNumber *windowLayer = info[(id)kCGWindowLayer];
+    // NSLog(@"Dictionary: %@", [info description]);
+    // NSLog(@"windowNumber: %@", [windowNumber description]);
+    // NSLog(@"windowLayer: %@", [windowLayer description]);
 
     auto app = [NSRunningApplication runningApplicationWithProcessIdentifier: [ownerPid intValue]];
     auto path = app ? [app.bundleURL.path UTF8String] : "";
 
-    if (app && path != "") {
+    if (app 
+      && path != "" 
+      && [windowLayer intValue] == 0 
+      && [info objectForKey:@"kCGWindowName"]
+      && [[info objectForKey:@"kCGWindowName"] length] != 0
+    ) {
+      // NSLog(@"Dictionary: %@", [info description]);
       vec.push_back(Napi::Number::New(env, [windowNumber intValue]));
     }
   }
@@ -132,6 +144,8 @@ Napi::Array getWindows(const Napi::CallbackInfo &info) {
     CFRelease(windowList);
   }
   
+  // NSLog(@"Returning getWindows()");
+
   return arr;
 }
 
@@ -175,6 +189,7 @@ Napi::Object initWindow(const Napi::CallbackInfo &info) {
     auto obj = Napi::Object::New(env);
     obj.Set("processId", [ownerPid intValue]);
     obj.Set("path", [app.bundleURL.path UTF8String]);
+    obj.Set("title", [wInfo[(id)kCGWindowOwnerName] UTF8String]);
 
     cacheWindow(handle, [ownerPid intValue]);
 
@@ -191,8 +206,14 @@ Napi::String getWindowTitle(const Napi::CallbackInfo &info) {
 
   auto wInfo = getWindowInfo(handle);
 
-  if (wInfo) {
+  // NSLog(@"owner: %@", [wInfo objectForKey:@"kCGWindowOwnerName"]);
+  // NSLog(@"name: %@", [wInfo objectForKey:@"kCGWindowName"]);
+  if (wInfo && [wInfo objectForKey:@"kCGWindowName"]) {
     NSString *windowName = wInfo[(id)kCGWindowName];
+    return Napi::String::New(env, [windowName UTF8String]);
+  }
+  if (wInfo && [wInfo objectForKey:@"kCGWindowOwnerName"]) {
+    NSString *windowName = wInfo[(id)kCGWindowOwnerName];
     return Napi::String::New(env, [windowName UTF8String]);
   }
 
